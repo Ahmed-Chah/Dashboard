@@ -1,21 +1,5 @@
 import subprocess
 import sys
-
-def install_package(package):
-    print(f"⏳ Installation de la dépendance '{package}' en cours...")
-    subprocess.check_call([sys.executable, "-m", "pip", "install", package])
-
-# Liste des dépendances nécessaires
-dependencies = ["streamlit", "pandas", "plotly", "numpy", "openpyxl"]
-
-# Vérification et installation dynamique des dépendances
-for dependency in dependencies:
-    try:
-        __import__(dependency)
-    except ImportError:
-        install_package(dependency)
-
-# Tes imports originaux (ils fonctionneront forcément après l'installation dynamique)
 import streamlit as st
 import pandas as pd
 import plotly.express as px
@@ -23,12 +7,25 @@ import plotly.graph_objects as go
 import os
 import numpy as np
 
+# Check and install dependencies
+def install_dependency(package):
+    print(f"Installing dependency '{package}'...")
+    subprocess.check_call([sys.executable, "-m", "pip", "install", package])
+
+required_packages = ["streamlit", "pandas", "plotly", "numpy", "openpyxl"]
+for package in required_packages:
+    try:
+        __import__(package)
+    except ImportError:
+        install_dependency(package)
+
 def load_data(file):
+    """Load data from an Excel file."""
     xls = pd.ExcelFile(file)
-    df = pd.read_excel(xls, sheet_name=xls.sheet_names[0])
-    return df
+    return pd.read_excel(xls, sheet_name=xls.sheet_names[0])
 
 def load_all_files():
+    """Load all Excel files in the current directory."""
     all_data = []
     microrobots = []
     folder_path = os.getcwd()
@@ -46,34 +43,59 @@ def load_all_files():
     return None, None
 
 def extract_microrobot_parameters(df):
+    """Extract parameters for a microrobot from the dataframe."""
+    def get_value(column):
+        return df[column].dropna().iloc[0] if column in df and not df[column].dropna().empty else "N/A"
+    
     parameters = {
-        "Line": df['Line'].dropna().iloc[0] if 'Line' in df and not df['Line'].dropna().empty else "N/A",
+        "Line": get_value('Line'),
         "Magnet Part": {
-            "Radius Extern (mm)": df['Magnet Radius extern'].dropna().iloc[0] if 'Magnet Radius extern' in df and not df['Magnet Radius extern'].dropna().empty else "N/A",
-            "Radius Intern (mm)": df['Magnet Radius extern.1'].dropna().iloc[0] if 'Magnet Radius extern.1' in df and not df['Magnet Radius extern.1'].dropna().empty else "N/A",
-            "Height (mm)": df['Magnet Hight'].dropna().iloc[0] if 'Magnet Hight' in df and not df['Magnet Hight'].dropna().empty else "N/A",
+            "Radius Extern (mm)": get_value('Magnet Radius extern'),
+            "Radius Intern (mm)": get_value('Magnet Radius extern.1'),
+            "Height (mm)": get_value('Magnet Hight'),
         },
         "Cup Part": {
-            "Radius Extern (mm)": df['Cup Radius extern'].dropna().iloc[0] if 'Cup Radius extern' in df and not df['Cup Radius extern'].dropna().empty else "N/A",
-            "Radius Intern (mm)": df['Cup Radius extern.1'].dropna().iloc[0] if 'Cup Radius extern.1' in df and not df['Cup Radius extern.1'].dropna().empty else "N/A",
-            "Height (mm)": df['Cup Hight'].dropna().iloc[0] if 'Cup Hight' in df and not df['Cup Hight'].dropna().empty else "N/A",
+            "Radius Extern (mm)": get_value('Cup Radius extern'),
+            "Radius Intern (mm)": get_value('Cup Radius extern.1'),
+            "Height (mm)": get_value('Cup Hight'),
         }
     }
     return parameters
 
-# Fonction pour extraire dynamiquement les sensibilités détaillées
-def extract_detailed_sensitivity(df):
-    sensitivity_factors = ['Actuation Angle', 'Magnetic Distance [cm]', 'Gravity Force',
-                           'Actuation Mode', 'Flow Profile', 'Embedding length']
+def calculate_sensitivity(df):
+    """Calculate sensitivity percentages for various parameters."""
+    factors = ['Flow Profile', 'Actuation Angle', 'Magnetic Distance [cm]', 
+               'Actuation Mode', "Gravity Force", "Embedding length"]
+    
+    # Calculate mean deflections for each factor
+    mean_deflections = {factor: df.groupby(factor)['Head Deflection Angle [°]'].mean() 
+                        for factor in factors if factor in df}
+    
+    # Calculate peak-to-peak differences
+    deflection_differences = {k: np.ptp(v.values) for k, v in mean_deflections.items()}
+    total_difference = sum(deflection_differences.values())
+    
+    # Calculate sensitivity percentages
+    return {k: (v / total_difference) * 100 for k, v in deflection_differences.items()}
 
+def extract_detailed_sensitivity(df):
+    """Extract detailed sensitivity metrics for a microrobot."""
+    sensitivity_factors = ['Actuation Angle', 'Magnetic Distance [cm]', 'Gravity Force',
+                          'Actuation Mode', 'Flow Profile', 'Embedding length']
+
+    # Calculate mean deflections for each factor
     mean_deflections = {factor: df.groupby(factor)['Head Deflection Angle [°]'].mean()
                         for factor in sensitivity_factors if factor in df}
 
+    # Calculate peak-to-peak differences
     deflection_differences = {k: np.ptp(v.values) for k, v in mean_deflections.items()}
     total_difference = sum(deflection_differences.values())
+    
+    # Calculate sensitivity percentages
     sensitivity_percentage = {factor: (deflection_differences.get(factor, 0) / total_difference) * 100
                               for factor in sensitivity_factors}
 
+    # Get max and mean deflection
     max_deflection = df['Head Deflection Angle [°]'].max()
     mean_deflection = df['Head Deflection Angle [°]'].mean()
 
@@ -90,69 +112,40 @@ def extract_detailed_sensitivity(df):
         "Embedding Length Sensitivity (%)": round(sensitivity_percentage['Embedding length'], 2)
     }
 
-def calculate_sensitivity(df):
-    factors = ['Flow Profile', 'Actuation Angle', 'Magnetic Distance [cm]', 'Actuation Mode', "Gravity Force", "Embedding length"]
-    mean_deflections = {factor: df.groupby(factor)['Head Deflection Angle [°]'].mean() for factor in factors}
-    deflection_differences = {k: np.ptp(v.values) for k, v in mean_deflections.items()}
-    total_difference = sum(deflection_differences.values())
-    sensitivity_percentage = {k: (v / total_difference) * 100 for k, v in deflection_differences.items()}
-    return sensitivity_percentage
-
-# New function to get all unique parameter values from all data
 def get_parameter_values(all_data):
+    """Get unique parameter values from the dataset."""
     if all_data is None:
         return {}
         
-    # Define parameter columns we're interested in
     param_columns = ['Actuation Angle', 'Magnetic Distance [cm]', 'Gravity Force', 
                      'Actuation Mode', 'Flow Profile', 'Embedding length']
     
-    # Get unique values for each parameter
     param_values = {}
     for param in param_columns:
         if param in all_data.columns:
-            # Convert all values to strings before sorting to avoid type comparison issues
             unique_values = sorted([str(x) for x in all_data[param].unique() if pd.notna(x)])
             param_values[param] = unique_values
     
     return param_values
 
-# Function to filter data based on selected parameter values
 def filter_data_by_params(df, selected_params):
+    """Filter data based on selected parameter values."""
     if df is None or not selected_params:
         return df
     
-    # Start with the original dataframe
     filtered_df = df.copy()
     
-    # Apply filters for each parameter
     for param, values in selected_params.items():
         if param in df.columns and values:
-            # Convert values in the dataframe to strings for comparison
             filtered_df = filtered_df[filtered_df[param].astype(str).isin(values)]
     
     return filtered_df
 
-# NEW FUNCTION: Special analysis for parameter variation
 def perform_special_analysis(all_data, param_values, current_microrobot_data=None):
-    """
-    Performs special analysis on microrobot data allowing users to select
-    one parameter for the x-axis while fixing values for other parameters.
-    
-    Args:
-        all_data (DataFrame): Combined data from all microrobots
-        param_values (dict): Dictionary of unique values for each parameter
-        current_microrobot_data (DataFrame, optional): Data for currently loaded microrobot
-    
-    Returns:
-        None (displays results directly in Streamlit)
-    """
-    # Determine which data and parameter values to use
+    """Perform special analysis on parameter variation."""
+    # Determine which data to use
     if current_microrobot_data is not None and not current_microrobot_data.empty:
-        # Use the currently loaded microrobot data
-        analysis_data = current_microrobot_data.copy()  # Make a copy to avoid modifying the original
-        
-        # Extract parameter values specific to this microrobot
+        analysis_data = current_microrobot_data.copy()
         microrobot_param_values = get_parameter_values(current_microrobot_data)
         
         if microrobot_param_values:
@@ -162,7 +155,6 @@ def perform_special_analysis(all_data, param_values, current_microrobot_data=Non
         else:
             data_source = "all microrobots (fallback)"
     else:
-        # Use the global dataset
         analysis_data = all_data.copy() if all_data is not None else None
         data_source = "all microrobots"
     
@@ -172,16 +164,15 @@ def perform_special_analysis(all_data, param_values, current_microrobot_data=Non
     
     st.markdown("<div class='section'>", unsafe_allow_html=True)
     st.header("🔍 Special Parameter Analysis")
-    st.markdown("This section allows you to analyze how microrobot deflection varies with one parameter while keeping other parameters fixed.")
+    st.markdown("Analyze how microrobot deflection varies with one parameter while keeping other parameters fixed.")
     
-    # Show a message indicating which data source is being used
     st.info(f"Using parameter values from {data_source}.")
     
     # Select parameter for x-axis
     available_params = list(param_values.keys())
     x_param = st.selectbox("Select parameter for X-axis:", available_params, key="special_x_param")
     
-    # Create filters for all other parameters (fixed values)
+    # Create filters for fixed parameters
     st.subheader("Fixed Parameter Values")
     st.markdown("Select one value for each parameter (except the X-axis parameter):")
     
@@ -207,24 +198,24 @@ def perform_special_analysis(all_data, param_values, current_microrobot_data=Non
                     selected = st.selectbox(f"{param}:", values, key=f"special_fixed_{param}")
                     fixed_params[param] = [selected]
     
-    # Apply button to perform analysis
+    # Analyze button
     if st.button("Analyze Parameter Effect", key="special_analyze_btn"):
-        # Filter the data based on fixed parameters
-        filtered_data = analysis_data.copy()  # Start with the correct dataset (microrobot-specific or global)
+        # Filter data based on fixed parameters
+        filtered_data = analysis_data.copy()
         
         for param, values in fixed_params.items():
             if param in filtered_data.columns and values:
                 filtered_data = filtered_data[filtered_data[param].astype(str).isin([str(v) for v in values])]
         
-        # Check if we have enough data after filtering
+        # Check for sufficient data
         if filtered_data.empty:
             st.error("No data matches the selected parameter values. Please adjust your selections.")
             st.markdown("</div>", unsafe_allow_html=True)
             return
         
-        # Group by the selected x-axis parameter and calculate stats
+        # Display analysis if there's data for the selected parameter
         if x_param in filtered_data.columns:
-    # Add special filtering information
+            # Analysis data source
             special_filter_info = """
             ### Analysis Data Source 
             """
@@ -236,7 +227,7 @@ def perform_special_analysis(all_data, param_values, current_microrobot_data=Non
                 
             st.markdown(special_filter_info)
             
-            # Display information about the fixed parameters
+            # Display fixed parameters
             st.subheader("Analysis Configuration")
             fixed_params_df = pd.DataFrame({
                 "Parameter": list(fixed_params.keys()),
@@ -252,12 +243,10 @@ def perform_special_analysis(all_data, param_values, current_microrobot_data=Non
                 'Min Deflection': grouped.min(),
             }).reset_index()
             
-            # Statistics table removed as requested
-            
-            # Create bar chart
+            # Create visualization
             st.subheader(f"Mean Deflection by {x_param}")
             
-            # Add microrobot name to title if using microrobot-specific data
+            # Add microrobot name to title if applicable
             title_suffix = ""
             if current_microrobot_data is not None and not current_microrobot_data.empty:
                 microrobot_name = current_microrobot_data['Microrobot'].iloc[0]
@@ -272,7 +261,7 @@ def perform_special_analysis(all_data, param_values, current_microrobot_data=Non
                 color_discrete_sequence=["royalblue"]
             )
             
-            # Add markers for min and max values
+            # Add min and max markers
             fig.add_scatter(
                 x=stats_df[x_param],
                 y=stats_df['Max Deflection'],
@@ -281,15 +270,15 @@ def perform_special_analysis(all_data, param_values, current_microrobot_data=Non
                 marker=dict(color='red', size=10)
             )
             
-            fig.add_scatter(
-                x=stats_df[x_param],
-                y=stats_df['Min Deflection'],
-                mode='markers',
-                name='Minimum',
-                marker=dict(color='green', size=10)
-            )
+            # fig.add_scatter(
+            #     x=stats_df[x_param],
+            #     y=stats_df['Min Deflection'],
+            #     mode='markers',
+            #     name='Minimum',
+            #     marker=dict(color='green', size=10)
+            # )
             
-            # Improve layout
+            # Layout improvements
             fig.update_layout(
                 xaxis_title=x_param,
                 yaxis_title='Deflection Angle [°]',
@@ -298,8 +287,6 @@ def perform_special_analysis(all_data, param_values, current_microrobot_data=Non
             )
             
             st.plotly_chart(fig, use_container_width=True)
-            
-            # Sample size and distribution visualizations removed as requested
         else:
             st.error(f"Parameter {x_param} not found in the data.")
     
@@ -333,7 +320,7 @@ def main():
     
     st.title("📊 Microrobot Analysis Dashboard")
     
-    # Add section toggles in sidebar
+    # Section toggles in sidebar
     st.sidebar.header("Dashboard Sections")
     if 'show_microrobot_analysis' not in st.session_state:
         st.session_state.show_microrobot_analysis = True
@@ -342,56 +329,51 @@ def main():
     if 'show_special_analysis' not in st.session_state:
         st.session_state.show_special_analysis = True
 
-    # Section toggles in sidebar
     st.session_state.show_microrobot_analysis = st.sidebar.toggle(
         "Show Individual Microrobot Analysis", 
-        value=st.session_state.show_microrobot_analysis,
-        help="Toggle visibility of individual microrobot analysis section"
+        value=st.session_state.show_microrobot_analysis
     )
     st.session_state.show_global_analysis = st.sidebar.toggle(
         "Show Global Analysis", 
-        value=st.session_state.show_global_analysis,
-        help="Toggle visibility of global microrobot analysis section"
+        value=st.session_state.show_global_analysis
     )
     st.session_state.show_special_analysis = st.sidebar.toggle(
         "Show Special Parameter Analysis", 
-        value=st.session_state.show_special_analysis,
-        help="Toggle visibility of special parameter analysis section"
+        value=st.session_state.show_special_analysis
     )
     
-    # Load all data at the beginning to get parameter values
+    # Load all data initially
     all_data, microrobots = load_all_files()
     param_values = get_parameter_values(all_data)
     
+    # File uploader
     with st.container():
         st.markdown("<div class='section'>", unsafe_allow_html=True)
         uploaded_file = st.file_uploader("📂 Upload an Excel file for analysis", type=["xlsx"])
         st.markdown("</div>", unsafe_allow_html=True)
     
-    # NEW SECTION: Parameter value filters
+    # Parameter filters section
     st.markdown("<div class='section'>", unsafe_allow_html=True)
     st.header("🔄 Unified Parameter Values")
-    st.markdown("Select which parameter values to include in your analysis for consistent comparison across microrobots:")
+    st.markdown("Select parameter values to include in your analysis:")
     
-    # Initialize selected parameters dictionary
+    # Initialize selected parameters
     if 'selected_params' not in st.session_state:
         st.session_state.selected_params = {}
     
-    # Create UI for parameter selection
+    # Parameter selection UI
     selected_params = {}
     if param_values:
         col1, col2 = st.columns(2)
         
-        params_left = list(param_values.keys())[:3]  # First half of parameters
-        params_right = list(param_values.keys())[3:]  # Second half of parameters
+        params_left = list(param_values.keys())[:3]
+        params_right = list(param_values.keys())[3:]
         
         with col1:
             for param in params_left:
                 if param in param_values:
                     st.subheader(f"{param}")
-                    # Get all unique values for this parameter
                     all_values = param_values[param]
-                    # Create a multiselect for each parameter
                     selected_values = st.multiselect(f"Select values for {param}", 
                                                     options=all_values,
                                                     default=all_values,
@@ -409,7 +391,7 @@ def main():
                                                     key=f"select_{param}")
                     selected_params[param] = selected_values
     
-        # Button to apply filters
+        # Apply filter button
         if st.button("Apply Parameter Filters"):
             st.session_state.selected_params = selected_params
             st.success("Filters applied! Analysis will now use only the selected parameter values.")
@@ -418,11 +400,11 @@ def main():
     
     st.markdown("</div>", unsafe_allow_html=True)
     
-    # Store the current selection in session state
+    # Store selections in session state
     if 'selected_params' not in st.session_state:
         st.session_state.selected_params = selected_params
     
-    # Individual file analysis - Now wrapped with section toggle
+    # Individual microrobot analysis
     if uploaded_file is not None and st.session_state.show_microrobot_analysis:
         df = load_data(uploaded_file)
         
@@ -430,10 +412,8 @@ def main():
         if st.session_state.selected_params:
             filtered_df = filter_data_by_params(df, st.session_state.selected_params)
             
-            # Check if we still have data after filtering
             if filtered_df.empty:
                 st.warning("No data left after applying filters. Please adjust your parameter selections.")
-                # Use original data in this case
                 filtered_df = df
         else:
             filtered_df = df
@@ -441,9 +421,10 @@ def main():
         microrobot_name = filtered_df['Microrobot'].iloc[0]
         parameters = extract_microrobot_parameters(filtered_df)
         
+        # Microrobot specifications
         st.markdown("<div class='section'>", unsafe_allow_html=True)
         st.header("📌 Microrobot Specifications")
-        st.text(f"**Line Type : {parameters['Line']}")
+        st.text(f"Line Type: {parameters['Line']}")
         
         col1, col2 = st.columns(2)
         with col1:
@@ -457,9 +438,11 @@ def main():
                 st.text(f"{key}: {value}")
         st.markdown("</div>", unsafe_allow_html=True)
         
+        # Microrobot analysis
         st.markdown("<div class='section'>", unsafe_allow_html=True)
         st.header(f"🔬 Microrobot Analysis: {microrobot_name}")
         
+        # Key metrics
         max_deflection = filtered_df['Head Deflection Angle [°]'].max()
         min_deflection = filtered_df['Head Deflection Angle [°]'].min()
         mean_deflection = filtered_df['Head Deflection Angle [°]'].mean()
@@ -469,7 +452,7 @@ def main():
         col2.metric("📉 Min Deflection", f"{min_deflection:.2f}°")
         col3.metric("📊 Average Deflection", f"{mean_deflection:.2f}°")
         
-        # Show the parameter values being used
+        # Parameter values used
         st.markdown("### 🔍 Parameter Values Used in Current Analysis")
         param_columns = ['Actuation Angle', 'Magnetic Distance [cm]', 'Gravity Force', 
                          'Actuation Mode', 'Flow Profile', 'Embedding length']
@@ -483,6 +466,7 @@ def main():
                                  "Values Used": [str(v) for v in param_usage.values()]})
         st.dataframe(param_df, use_container_width=True)
         
+        # Visualizations
         col1, col2 = st.columns(2)
         with col1:
             if 'Magnetic Distance [cm]' in filtered_df.columns:
@@ -516,9 +500,10 @@ def main():
         with col6:
             if 'Embedding length' in filtered_df.columns:
                 fig6 = px.box(filtered_df, x='Embedding length', y='Head Deflection Angle [°]', 
-                             title="Deflection vs Embedding length", color_discrete_sequence=["darkorange"])
+                             title="Deflection vs Embedding Length", color_discrete_sequence=["darkorange"])
                 st.plotly_chart(fig6, use_container_width=True)
         
+        # Sensitivity pie chart
         sensitivity_data = calculate_sensitivity(filtered_df)
         sensitivity_df = pd.DataFrame(list(sensitivity_data.items()), columns=['Parameter', 'Sensitivity (%)'])
         fig7 = px.pie(sensitivity_df, values='Sensitivity (%)', names='Parameter', 
@@ -527,7 +512,7 @@ def main():
         st.plotly_chart(fig7, use_container_width=True)
         st.markdown("</div>", unsafe_allow_html=True)
     
-    # Global Analysis with filtered data - Now wrapped with section toggle
+    # Global analysis
     if st.session_state.show_global_analysis:
         st.markdown("<div class='section'>", unsafe_allow_html=True)
         st.header("🌍 Global Analysis of Microrobots")
@@ -537,7 +522,6 @@ def main():
             if st.session_state.selected_params:
                 filtered_all_data = filter_data_by_params(all_data, st.session_state.selected_params)
                 
-                # Check if we still have data after filtering
                 if filtered_all_data.empty:
                     st.warning("No global data left after applying filters. Please adjust your parameter selections.")
                     filtered_all_data = all_data
@@ -571,31 +555,31 @@ def main():
                 
                 if all_sensitivity_data:
                     rectified_df = pd.DataFrame(all_sensitivity_data)
-                    rectified_df['Classement'] = rectified_df['Max Deflection (°)'].rank(ascending=False).astype(int)
-                    rectified_df = rectified_df[['Microrobot', 'Classement', 'Max Deflection (°)', 'Mean Deflection (°)',
-                                                 'Most Sensitive Parameter', 'Actuation Angle Sensitivity (%)',
-                                                 'Distance Sensitivity (%)', 'Gravity Sensitivity (%)',
-                                                 'Actuation Mode Sensitivity (%)', 'Flow Sensitivity (%)',
-                                                 'Embedding Length Sensitivity (%)']].sort_values(by='Max Deflection (°)', ascending=False)
+                    rectified_df['Rank'] = rectified_df['Max Deflection (°)'].rank(ascending=False).astype(int)
+                    cols = ['Microrobot', 'Rank', 'Max Deflection (°)', 'Mean Deflection (°)',
+                           'Most Sensitive Parameter', 'Actuation Angle Sensitivity (%)',
+                           'Distance Sensitivity (%)', 'Gravity Sensitivity (%)',
+                           'Actuation Mode Sensitivity (%)', 'Flow Sensitivity (%)',
+                           'Embedding Length Sensitivity (%)']
+                    rectified_df = rectified_df[cols].sort_values(by='Max Deflection (°)', ascending=False)
                     
                     st.markdown("<div class='section'>", unsafe_allow_html=True)
-                    st.header("📑 Comparative Table of Microrobots vs Params")
-                    # On définit la colonne "Microrobot" comme index pour rester visible en scrolling horizontal
+                    st.header("📑 Comparative Table of Microrobots")
                     rectified_df.set_index('Microrobot', inplace=True)
                     st.dataframe(rectified_df, use_container_width=True)
                     st.markdown("</div>", unsafe_allow_html=True)
                 else:
-                    st.warning("Not enough data for comparative analysis after filtering. Try adjusting your parameter selections.")
+                    st.warning("Not enough data for comparative analysis after filtering.")
             else:
-                st.info("After filtering, there are not enough different microrobots for comparison. Try adjusting your parameter selections.")
+                st.info("After filtering, there are not enough different microrobots for comparison.")
         else:
-            st.info("Not enough microrobot data files found for global analysis. Please ensure multiple Excel files are available in the current directory.")
+            st.info("Not enough microrobot data files found for global analysis.")
         
         st.markdown("</div>", unsafe_allow_html=True)
     
-    # Add Special Analysis Section - wrapped with section toggle
+    # Special parameter analysis section
     if st.session_state.show_special_analysis:
-        # Pass the current microrobot data if available
+        # Pass current microrobot data if available
         current_microrobot_data = None
         if uploaded_file is not None:
             current_microrobot_data = filtered_df if 'filtered_df' in locals() else df
