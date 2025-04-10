@@ -129,6 +129,47 @@ def get_parameter_values(all_data):
     
     return param_values
 
+def find_common_parameter_values(all_data):
+    """
+    Find parameter values that are common across all microrobots.
+    Returns a dictionary with parameters as keys and lists of common values as values.
+    """
+    if all_data is None or all_data.empty:
+        return {}
+    
+    # Get list of all microrobots
+    microrobots = all_data['Microrobot'].unique()
+    if len(microrobots) <= 1:
+        return {}
+    
+    # Define parameters to analyze
+    param_columns = ['Actuation Angle', 'Magnetic Distance [cm]', 'Gravity Force', 
+                     'Actuation Mode', 'Flow Profile', 'Embedding length']
+    
+    # Initialize dictionary to store parameter values for each microrobot
+    param_values_by_microrobot = {param: {} for param in param_columns if param in all_data.columns}
+    
+    # Collect parameter values for each microrobot
+    for robot in microrobots:
+        robot_data = all_data[all_data['Microrobot'] == robot]
+        for param in param_values_by_microrobot.keys():
+            unique_values = sorted([str(val) for val in robot_data[param].unique() if pd.notna(val)])
+            param_values_by_microrobot[param][robot] = set(unique_values)
+    
+    # Find common values for each parameter
+    common_param_values = {}
+    for param, values_by_robot in param_values_by_microrobot.items():
+        # Skip if any robot doesn't have values for this parameter
+        if any(len(values) == 0 for values in values_by_robot.values()):
+            continue
+        
+        # Get intersection of values across all robots
+        common_values = set.intersection(*values_by_robot.values())
+        if common_values:
+            common_param_values[param] = sorted(list(common_values))
+    
+    return common_param_values
+
 def show_parameter_variations(df, all_data=None):
     """
     Extract and display the parameter test matrix for each microrobot.
@@ -506,34 +547,103 @@ def perform_special_analysis(all_data, param_values, current_microrobot_data=Non
         st.session_state.current_analysis_params = {
             'x_param': None,
             'fixed_params': {},
+            'selected_microrobot': None,
         }
     
     # Initialize x_param in session state if not exists
     if 'x_param_value' not in st.session_state:
         st.session_state.x_param_value = None
-    
-    # Determine which data to use
-    if current_microrobot_data is not None and not current_microrobot_data.empty:
-        analysis_data = current_microrobot_data.copy()
-        microrobot_param_values = get_parameter_values(current_microrobot_data)
         
-        if microrobot_param_values:
-            param_values = microrobot_param_values
-            microrobot_name = current_microrobot_data['Microrobot'].iloc[0]
-            data_source = f"current microrobot ({microrobot_name})"
-        else:
-            data_source = "all microrobots (fallback)"
-    else:
-        analysis_data = all_data.copy() if all_data is not None else None
-        data_source = "all microrobots"
-    
-    if analysis_data is None or param_values is None or len(param_values) == 0:
-        st.warning("No data available for special analysis. Please ensure data is loaded.")
-        return
+    # Initialize selected microrobot in session state if not exists
+    if 'selected_microrobot' not in st.session_state:
+        st.session_state.selected_microrobot = None
     
     st.markdown("<div class='section'>", unsafe_allow_html=True)
     st.header("🔍 Special Parameter Analysis")
     st.markdown("Analyze how microrobot deflection varies with one parameter while keeping other parameters fixed.")
+    
+    # Get list of all available microrobots from data
+    available_microrobots = []
+    if all_data is not None and not all_data.empty:
+        available_microrobots = sorted(all_data['Microrobot'].unique())
+    
+    # Microrobot selection (NEW FEATURE)
+    col1, col2 = st.columns([2, 3])
+    with col1:
+        st.subheader("Select Microrobot")
+        
+        # Default to the current microrobot if one is uploaded
+        default_robot = None
+        if current_microrobot_data is not None and not current_microrobot_data.empty:
+            default_robot = current_microrobot_data['Microrobot'].iloc[0]
+            if st.session_state.selected_microrobot is None:
+                st.session_state.selected_microrobot = default_robot
+        
+        # If we have a stored selection but it's not in available_microrobots, reset it
+        if st.session_state.selected_microrobot not in available_microrobots and available_microrobots:
+            st.session_state.selected_microrobot = available_microrobots[0]
+        
+        # Microrobot selection dropdown
+        selected_microrobot = st.selectbox(
+            "Choose a microrobot to analyze:",
+            options=available_microrobots,
+            index=available_microrobots.index(st.session_state.selected_microrobot) if st.session_state.selected_microrobot in available_microrobots else 0,
+            key="microrobot_select"
+        )
+        
+        # Update session state with selection
+        if selected_microrobot != st.session_state.selected_microrobot:
+            st.session_state.selected_microrobot = selected_microrobot
+            # Reset analysis state when microrobot changes
+            st.session_state.special_analysis_submitted = False
+            # Rerun to reflect the change immediately
+            st.rerun()
+    
+    with col2:
+        # Show info about the selected microrobot
+        if st.session_state.selected_microrobot and all_data is not None:
+            robot_data = all_data[all_data['Microrobot'] == st.session_state.selected_microrobot]
+            if not robot_data.empty:
+                st.subheader(f"📌 {st.session_state.selected_microrobot} Overview")
+                
+                # Get key metrics
+                max_deflection = robot_data['Head Deflection Angle [°]'].max()
+                mean_deflection = robot_data['Head Deflection Angle [°]'].mean()
+                
+                # Display in columns
+                met_col1, met_col2 = st.columns(2)
+                met_col1.metric("Max Deflection", f"{max_deflection:.2f}°")
+                met_col2.metric("Average Deflection", f"{mean_deflection:.2f}°")
+                
+                # Get number of parameter variations
+                param_counts = {}
+                for param in ['Actuation Angle', 'Magnetic Distance [cm]', 'Gravity Force', 
+                              'Actuation Mode', 'Flow Profile', 'Embedding length']:
+                    if param in robot_data.columns:
+                        param_counts[param] = len(robot_data[param].unique())
+                
+                if param_counts:
+                    # Find the parameter with the most variations
+                    most_varied = max(param_counts.items(), key=lambda x: x[1])
+                    st.caption(f"Most varied parameter: {most_varied[0]} ({most_varied[1]} values)")
+    
+    # Determine which data to use based on the selected microrobot
+    analysis_data = None
+    data_source = None
+    
+    if st.session_state.selected_microrobot and all_data is not None:
+        # Filter all_data for the selected microrobot
+        analysis_data = all_data[all_data['Microrobot'] == st.session_state.selected_microrobot].copy()
+        data_source = f"microrobot: {st.session_state.selected_microrobot}"
+        
+        # Get parameter values for this specific microrobot
+        param_values = get_parameter_values(analysis_data)
+    
+    # Handle case where no data is available
+    if analysis_data is None or analysis_data.empty or param_values is None or len(param_values) == 0:
+        st.warning("No data available for the selected microrobot. Please choose another microrobot or ensure data is loaded.")
+        st.markdown("</div>", unsafe_allow_html=True)
+        return
     
     st.info(f"Using parameter values from {data_source}.")
     
@@ -595,6 +705,7 @@ def perform_special_analysis(all_data, param_values, current_microrobot_data=Non
             st.session_state.current_analysis_params = {
                 'x_param': x_param,
                 'fixed_params': fixed_params.copy(),
+                'selected_microrobot': st.session_state.selected_microrobot,
             }
             st.session_state.special_analysis_submitted = True
     
@@ -633,15 +744,9 @@ def perform_special_analysis(all_data, param_values, current_microrobot_data=Non
                 'Min Deflection': grouped.min(),
             }).reset_index()
             
-            # Add microrobot name to title if applicable
-            microrobot_name = None
-            title_suffix = ""
-            if current_microrobot_data is not None and not current_microrobot_data.empty:
-                microrobot_name = current_microrobot_data['Microrobot'].iloc[0]
-                title_suffix = f" for {microrobot_name}"
-            
-            # Create plot title with parameter details
-            plot_title = f"Variation of Deflection Angle with {x_param}{title_suffix}"
+            # Create plot title with microrobot name
+            microrobot_name = st.session_state.selected_microrobot
+            plot_title = f"Variation of Deflection Angle with {x_param} for {microrobot_name}"
             
             # Create subplot labels
             subplot_params = [f"{param}: {values[0]}" for param, values in fixed_params.items()]
@@ -702,7 +807,7 @@ def perform_special_analysis(all_data, param_values, current_microrobot_data=Non
                 # Add separate "Add to comparison" button outside the form
                 if st.button("Add to Customized Graphics", key="save_current_plot"):
                     st.session_state.saved_comparison_plots.append(plot_metadata)
-                    st.success(f"✅ Plot add ! You now have {len(st.session_state.saved_comparison_plots)} graphics.")
+                    st.success(f"✅ Plot added! You now have {len(st.session_state.saved_comparison_plots)} graphics.")
                     st.rerun()
         else:
             with plot_container:
@@ -755,6 +860,7 @@ def perform_special_analysis(all_data, param_values, current_microrobot_data=Non
                     
                     # Add subtitle with parameter details
                     st.caption(f"⚙️ Parameters: {plot_data['subtitle']}")
+                    st.caption(f"🤖 Microrobot: {plot_data['microrobot_name']}")
                     
                     # Plot chart
                     st.plotly_chart(fig, use_container_width=True, key=f"saved_plot_{plot_data['id']}")
@@ -1026,21 +1132,33 @@ def main():
         st.plotly_chart(fig7, use_container_width=True, key="sensitivity_pie")
         st.markdown("</div>", unsafe_allow_html=True)
     
-    # Global analysis
+    # Global analysis - UPDATED to use common parameter values
     if st.session_state.show_global_analysis:
         st.markdown("<div class='section'>", unsafe_allow_html=True)
         st.header("🌍 Global Analysis of Microrobots")
         
         if all_data is not None and len(microrobots) > 1:
-            # Apply parameter filters to global data
-            if st.session_state.selected_params:
-                filtered_all_data = filter_data_by_params(all_data, st.session_state.selected_params)
+            # Find common parameter values across all microrobots
+            common_param_values = find_common_parameter_values(all_data)
+            
+            # Apply common parameter values as filters for global analysis
+            if common_param_values:
+                filtered_all_data = filter_data_by_params(all_data, common_param_values)
                 
-                if filtered_all_data.empty:
-                    st.warning("No global data left after applying filters. Please adjust your parameter selections.")
+                # Check if we have enough data after filtering
+                if filtered_all_data.empty or len(filtered_all_data['Microrobot'].unique()) <= 1:
+                    st.warning("Not enough data after filtering by common parameter values. Using all available data instead.")
                     filtered_all_data = all_data
+                else:
+                    # Show what common values are being used
+                    st.info("Global analysis is using only parameter values common across all microrobots.")
+                    common_values_info = {param: ", ".join(values) for param, values in common_param_values.items()}
+                    common_values_df = pd.DataFrame({"Parameter": common_values_info.keys(), 
+                                                   "Common Values": common_values_info.values()})
+                    st.dataframe(common_values_df, use_container_width=True)
             else:
                 filtered_all_data = all_data
+                st.info("No common parameter values found across all microrobots. Using all available data.")
             
             # Check if we have multiple microrobots after filtering
             if len(filtered_all_data['Microrobot'].unique()) > 1:
@@ -1054,7 +1172,7 @@ def main():
                              title="Top Microrobots by Max Deflection", color_discrete_sequence=["darkblue"])
                 st.plotly_chart(fig9, use_container_width=True, key="global_micro_bar")
                 
-                                    # Comparative table with filtered data
+                # Comparative table with filtered data
                 microrobots_after_filter = filtered_all_data['Microrobot'].unique()
                 all_sensitivity_data = []
                 
@@ -1091,9 +1209,7 @@ def main():
         
         st.markdown("</div>", unsafe_allow_html=True)
     
-    # All microrobots parameter variations section (SIMPLIFIED VERSION)
-    
-    # Special parameter analysis section
+    # Special parameter analysis section - UPDATED to allow direct microrobot selection
     if st.session_state.show_special_analysis:
         # Pass current microrobot data if available
         current_microrobot_data = None
