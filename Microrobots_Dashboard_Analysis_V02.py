@@ -354,7 +354,7 @@ def main():
     
     # Parameter filters section
     st.markdown("<div class='section'>", unsafe_allow_html=True)
-    st.header("🔄 Unified Parameter Values")
+    st.title("🔄 Unified Parameter Values")
     st.markdown("Select parameter values to include in your analysis:")
     
     # Initialize selected parameters
