@@ -275,7 +275,7 @@ def show_simple_parameter_variations_table(all_data):
     param_columns = ['Actuation Angle', 'Magnetic Distance [cm]', 'Gravity Force', 
                      'Actuation Mode', 'Flow Profile', 'Embedding length']
     
-    with st.expander("📊 Parameter Variations for All Microrobots", expanded=True):
+    with st.expander("📊 Parameter Variations for All Microrobots", expanded=False):
         st.markdown("<div class='section'>", unsafe_allow_html=True)
         st.markdown("This table shows what parameter values were tested for each microrobot design.")
         
@@ -924,7 +924,7 @@ def main():
     if 'show_microrobot_analysis' not in st.session_state:
         st.session_state.show_microrobot_analysis = True
     if 'show_global_analysis' not in st.session_state:
-        st.session_state.show_global_analysis = True
+        st.session_state.show_global_analysis = False
     if 'show_special_analysis' not in st.session_state:
         st.session_state.show_special_analysis = True
     if 'show_unified_params' not in st.session_state:

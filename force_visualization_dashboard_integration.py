@@ -17,7 +17,7 @@ def add_force_visualization_section():
     st.header("🔄 Force Vector Visualization")
     st.markdown("""
     This section helps you understand how different forces (gravity, magnetic, drag) 
-    affect the microrobot under various conditions.
+    are used in magneto-fluidic tests to deflect microrobot.
     """)
     
     # Simplified interface with only custom configuration
@@ -71,7 +71,7 @@ def add_force_visualization_section():
             "Flow Velocity (cm/s):",
             min_value=0.0,
             max_value=100.0,
-            value=0.0,
+            value=40.0,
             step=0.5,
             key="custom_flow"
         )
