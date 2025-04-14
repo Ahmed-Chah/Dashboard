@@ -235,54 +235,17 @@ def show_parameter_variations(df, all_data=None):
                 # Extract unique values for this parameter for this microrobot
                 unique_values = sorted([str(val) for val in df[param].unique() if pd.notna(val)])
                 
-                # Compare with global variations if all_data is provided
-                global_unique = []
-                if all_data is not None and param in all_data.columns:
-                    global_unique = sorted([str(val) for val in all_data[param].unique() if pd.notna(val)])
-                
-                # Check if this microrobot has custom/unique variations
-                has_unique_variations = False
-                if global_unique and set(unique_values) != set(global_unique):
-                    has_unique_variations = True
-                
                 # Add row to the table
                 test_matrix_data.append({
                     "Parameter": param,
                     "Values Tested": ", ".join(unique_values),
-                    "Number of Values": len(unique_values),
-                    "Has Unique Variations": "✓" if has_unique_variations else ""
+                    "Number of Values": len(unique_values)
                 })
         
         # Create and display the test matrix table
         if test_matrix_data:
             test_matrix_df = pd.DataFrame(test_matrix_data)
             st.dataframe(test_matrix_df, use_container_width=True)
-            
-            # Add a visualization of parameter variations
-            st.markdown("### 📊 Parameter Variations Visualization")
-            st.markdown("Select a parameter to see how its values are distributed in the tests:")
-            
-            # Parameter selection
-            selected_param = st.selectbox(
-                "Select Parameter:",
-                [p for p in params if p in df.columns],
-                key="param_var_select"
-            )
-            
-            if selected_param in df.columns:
-                # Count occurrences of each value
-                value_counts = df[selected_param].value_counts().reset_index()
-                value_counts.columns = [selected_param, 'Count']
-                
-                # Create bar chart
-                fig = px.bar(
-                    value_counts, 
-                    x=selected_param, 
-                    y='Count',
-                    title=f"Test Count for Each {selected_param} Value",
-                    color_discrete_sequence=["teal"]
-                )
-                st.plotly_chart(fig, use_container_width=True, key="param_var_chart")
         else:
             st.info("No parameter variations found for this microrobot.")
         
@@ -1091,9 +1054,19 @@ def main():
                     if param in param_values:
                         st.subheader(f"{param}")
                         all_values = param_values[param]
+                        
+                        # Set default values based on parameter name
+                        default_values = all_values
+                        if param == 'Actuation Angle' and '45' in all_values and '67' in all_values and '90' in all_values:
+                            default_values = ['45', '67', '90']
+                        elif param == 'Magnetic Distance [cm]' and all(str(i) in all_values for i in range(13, 26)):
+                            default_values = [str(i) for i in range(13, 26) if str(i) in all_values]
+                        elif param == 'Gravity Force' and '0' in all_values and '180' in all_values:
+                            default_values = ['0', '180']
+                        
                         selected_values = st.multiselect(f"Select values for {param}", 
                                                         options=all_values,
-                                                        default=all_values,
+                                                        default=default_values,
                                                         key=f"select_{param}")
                         selected_params[param] = selected_values
             
@@ -1102,9 +1075,19 @@ def main():
                     if param in param_values:
                         st.subheader(f"{param}")
                         all_values = param_values[param]
+                        
+                        # Set default values based on parameter name
+                        default_values = all_values
+                        if param == 'Actuation Mode' and 'Attractive' in all_values and 'Repulsive' in all_values:
+                            default_values = ['Attractive', 'Repulsive']
+                        elif param == 'Flow Profile' and 'Average' in all_values and 'High' in all_values and 'Low' in all_values:
+                            default_values = ['Average', 'High', 'Low']
+                        elif param == 'Embedding length' and '10' in all_values:
+                            default_values = ['10']
+                        
                         selected_values = st.multiselect(f"Select values for {param}", 
                                                         options=all_values,
-                                                        default=all_values,
+                                                        default=default_values,
                                                         key=f"select_{param}")
                         selected_params[param] = selected_values
         
@@ -1112,6 +1095,13 @@ def main():
             if st.button("Apply Parameter Filters"):
                 st.session_state.selected_params = selected_params
                 st.success("Filters applied! Analysis will now use only the selected parameter values.")
+            # Auto-apply filters for newly loaded microrobots
+            if 'auto_apply_filters' in st.session_state and st.session_state.auto_apply_filters:
+                # Clear the flag so we don't keep auto-applying
+                st.session_state.auto_apply_filters = False
+                # Update selected params
+                st.session_state.selected_params = selected_params
+                st.success("Filters automatically applied for new microrobot!")
         else:
             st.info("No data loaded yet. Please upload a file or ensure Excel files are in the current directory.")
         
@@ -1125,6 +1115,14 @@ def main():
     if uploaded_file is not None and st.session_state.show_microrobot_analysis:
         df = load_data(uploaded_file)
         
+        # Check if this is a new file upload
+        if 'last_uploaded_file' not in st.session_state or st.session_state.last_uploaded_file != uploaded_file.name:
+            st.session_state.last_uploaded_file = uploaded_file.name
+            # Set a flag to trigger the parameter filter button click
+            st.session_state.auto_apply_filters = True
+            # Force a rerun to apply the filters
+            st.rerun()
+            
         # Apply parameter filters
         if st.session_state.selected_params:
             filtered_df = filter_data_by_params(df, st.session_state.selected_params)
@@ -1303,13 +1301,13 @@ def main():
             }
             
             # Create tabs for different analysis cases
-            global_tab1, global_tab2, global_tab3 = st.tabs(["Normal Case", "Best Conditions", "Difficult Conditions"])
+            global_tab1, global_tab2, global_tab3 = st.tabs(["Common Parameters", "Best Conditions", "Difficult Conditions"])
             
-            # Normal case tab
+            # Common Parameters tab
             with global_tab1:
-                st.markdown("### Normal Case: Using Common Parameters")
+                st.markdown("### Common Parameters")
                 
-                # Apply common parameter values as filters for normal case
+                # Apply common parameter values as filters for Common Parameters
                 if common_param_values:
                     filtered_all_data = filter_data_by_params(microrobot_filtered_data, common_param_values)
                     
@@ -1330,44 +1328,50 @@ def main():
                 
                 # Check if we have multiple microrobots after filtering
                 if len(filtered_all_data['Microrobot'].unique()) > 1:
-                    # Create distance vs deflection plot for all selected microrobots as a bar chart
-                    if 'Magnetic Distance [cm]' in filtered_all_data.columns:
-                        st.markdown("#### Deflection vs Magnetic Distance by Microrobot")
-                        # Group by microrobot and magnetic distance and calculate mean deflection
-                        distance_data = filtered_all_data.groupby(['Microrobot', 'Magnetic Distance [cm]'])['Head Deflection Angle [°]'].mean().reset_index()
-                        
-                        # Convert Magnetic Distance to string to ensure proper categorical display in bar chart
-                        distance_data['Magnetic Distance [cm]'] = distance_data['Magnetic Distance [cm]'].astype(str)
-                        
-                        # Create bar chart with grouped bars
-                        fig_distance = px.bar(
-                            distance_data, 
-                            x='Magnetic Distance [cm]', 
-                            y='Head Deflection Angle [°]',
-                            color='Microrobot', 
-                            barmode='group',
-                            title="Deflection vs Magnetic Distance (Normal Case)",
-                            color_discrete_sequence=px.colors.qualitative.Plotly
-                        )
-                        
-                        # Improve layout
-                        fig_distance.update_layout(
-                            xaxis_title="Magnetic Distance [cm]",
-                            yaxis_title="Mean Deflection Angle [°]",
-                            legend_title="Microrobot",
-                            bargap=0.15
-                        )
-                        
-                        st.plotly_chart(fig_distance, use_container_width=True, key="normal_distance_bar")
+                    # Create two columns for side-by-side display of charts
+                    col_dist, col_max = st.columns(2)
                     
-                    # Display the Top Microrobots bar chart (sorted from lowest to highest)
-                    max_deflection_by_micro = filtered_all_data.groupby('Microrobot')['Head Deflection Angle [°]'].max().reset_index()
-                    max_deflection_by_micro = max_deflection_by_micro.sort_values(by='Head Deflection Angle [°]', ascending=True).head(20)
-                    fig9 = px.bar(max_deflection_by_micro, x='Microrobot', y='Head Deflection Angle [°]', 
-                                 title="Top Microrobots by Max Deflection (Normal Case)", color_discrete_sequence=["darkblue"])
-                    st.plotly_chart(fig9, use_container_width=True, key="global_micro_bar_normal")
+                    with col_dist:
+                        # Create distance vs deflection plot for all selected microrobots as a bar chart
+                        if 'Magnetic Distance [cm]' in filtered_all_data.columns:
+                            st.markdown("#### Deflection vs Magnetic Distance by Microrobot")
+                            # Group by microrobot and magnetic distance and calculate mean deflection
+                            distance_data = filtered_all_data.groupby(['Microrobot', 'Magnetic Distance [cm]'])['Head Deflection Angle [°]'].mean().reset_index()
+                            
+                            # Convert Magnetic Distance to string to ensure proper categorical display in bar chart
+                            distance_data['Magnetic Distance [cm]'] = distance_data['Magnetic Distance [cm]'].astype(str)
+                            
+                            # Create bar chart with grouped bars
+                            fig_distance = px.bar(
+                                distance_data, 
+                                x='Magnetic Distance [cm]', 
+                                y='Head Deflection Angle [°]',
+                                color='Microrobot', 
+                                barmode='group',
+                                title="Deflection vs Magnetic Distance (Common Parameters)",
+                                color_discrete_sequence=px.colors.qualitative.Plotly
+                            )
+                            
+                            # Improve layout
+                            fig_distance.update_layout(
+                                xaxis_title="Magnetic Distance [cm]",
+                                yaxis_title="Mean Deflection Angle [°]",
+                                legend_title="Microrobot",
+                                bargap=0.15
+                            )
+                            
+                            st.plotly_chart(fig_distance, use_container_width=True, key="normal_distance_bar")
                     
-                    # Comparative table with filtered data for normal case
+                    with col_max:
+                        # Display the Top Microrobots bar chart (sorted from lowest to highest)
+                        st.markdown("#### Top Microrobots by Max Deflection")
+                        max_deflection_by_micro = filtered_all_data.groupby('Microrobot')['Head Deflection Angle [°]'].max().reset_index()
+                        max_deflection_by_micro = max_deflection_by_micro.sort_values(by='Head Deflection Angle [°]', ascending=True).head(20)
+                        fig9 = px.bar(max_deflection_by_micro, x='Microrobot', y='Head Deflection Angle [°]', 
+                                    title="Top Microrobots by Max Deflection (Common Parameters)", color_discrete_sequence=["darkblue"])
+                        st.plotly_chart(fig9, use_container_width=True, key="global_micro_bar_normal")
+                    
+                    # Comparative table with filtered data for Common Parameters
                     microrobots_after_filter = filtered_all_data['Microrobot'].unique()
                     all_sensitivity_data = []
                     
@@ -1390,13 +1394,13 @@ def main():
                                'Embedding Length Sensitivity (%)']
                         rectified_df = rectified_df[cols].sort_values(by='Max Deflection (°)', ascending=False)
                         
-                        st.markdown("### 📑 Comparative Table of Microrobots (Normal Case)")
+                        st.markdown("### 📑 Comparative Table of Microrobots (Common Parameters)")
                         rectified_df.set_index('Microrobot', inplace=True)
                         st.dataframe(rectified_df, use_container_width=True)
                     else:
                         st.warning("Not enough data for comparative analysis after filtering.")
                 else:
-                    st.info("After filtering, there are not enough different microrobots for comparison in Normal Case.")
+                    st.info("After filtering, there are not enough different microrobots for comparison in Common Parameters.")
             
             # Best conditions tab
             with global_tab2:
@@ -1420,42 +1424,48 @@ def main():
                 if best_filtered_data.empty or len(best_filtered_data['Microrobot'].unique()) <= 1:
                     st.warning("Not enough data after filtering by best conditions. Some microrobots may not have been tested under these exact conditions.")
                 else:
-                    # Create distance vs deflection plot for all selected microrobots as a bar chart
-                    if 'Magnetic Distance [cm]' in best_filtered_data.columns:
-                        st.markdown("#### Deflection vs Magnetic Distance by Microrobot")
-                        # Group by microrobot and magnetic distance and calculate mean deflection
-                        distance_data_best = best_filtered_data.groupby(['Microrobot', 'Magnetic Distance [cm]'])['Head Deflection Angle [°]'].mean().reset_index()
-                        
-                        # Convert Magnetic Distance to string to ensure proper categorical display in bar chart
-                        distance_data_best['Magnetic Distance [cm]'] = distance_data_best['Magnetic Distance [cm]'].astype(str)
-                        
-                        # Create bar chart with grouped bars
-                        fig_distance_best = px.bar(
-                            distance_data_best, 
-                            x='Magnetic Distance [cm]', 
-                            y='Head Deflection Angle [°]',
-                            color='Microrobot', 
-                            barmode='group',
-                            title="Deflection vs Magnetic Distance (Best Conditions)",
-                            color_discrete_sequence=px.colors.qualitative.Plotly
-                        )
-                        
-                        # Improve layout
-                        fig_distance_best.update_layout(
-                            xaxis_title="Magnetic Distance [cm]",
-                            yaxis_title="Mean Deflection Angle [°]",
-                            legend_title="Microrobot",
-                            bargap=0.15
-                        )
-                        
-                        st.plotly_chart(fig_distance_best, use_container_width=True, key="best_distance_bar")
+                    # Create two columns for side-by-side display of charts
+                    col_dist_best, col_max_best = st.columns(2)
                     
-                    # Display Top Microrobots bar chart for best conditions (sorted from lowest to highest)
-                    max_deflection_best = best_filtered_data.groupby('Microrobot')['Head Deflection Angle [°]'].max().reset_index()
-                    max_deflection_best = max_deflection_best.sort_values(by='Head Deflection Angle [°]', ascending=True).head(20)
-                    fig_best = px.bar(max_deflection_best, x='Microrobot', y='Head Deflection Angle [°]', 
-                                     title="Top Microrobots by Max Deflection (Best Conditions)", color_discrete_sequence=["green"])
-                    st.plotly_chart(fig_best, use_container_width=True, key="global_micro_bar_best")
+                    with col_dist_best:
+                        # Create distance vs deflection plot for all selected microrobots as a bar chart
+                        if 'Magnetic Distance [cm]' in best_filtered_data.columns:
+                            st.markdown("#### Deflection vs Magnetic Distance by Microrobot")
+                            # Group by microrobot and magnetic distance and calculate mean deflection
+                            distance_data_best = best_filtered_data.groupby(['Microrobot', 'Magnetic Distance [cm]'])['Head Deflection Angle [°]'].mean().reset_index()
+                            
+                            # Convert Magnetic Distance to string to ensure proper categorical display in bar chart
+                            distance_data_best['Magnetic Distance [cm]'] = distance_data_best['Magnetic Distance [cm]'].astype(str)
+                            
+                            # Create bar chart with grouped bars
+                            fig_distance_best = px.bar(
+                                distance_data_best, 
+                                x='Magnetic Distance [cm]', 
+                                y='Head Deflection Angle [°]',
+                                color='Microrobot', 
+                                barmode='group',
+                                title="Deflection vs Magnetic Distance (Best Conditions)",
+                                color_discrete_sequence=px.colors.qualitative.Plotly
+                            )
+                            
+                            # Improve layout
+                            fig_distance_best.update_layout(
+                                xaxis_title="Magnetic Distance [cm]",
+                                yaxis_title="Mean Deflection Angle [°]",
+                                legend_title="Microrobot",
+                                bargap=0.15
+                            )
+                            
+                            st.plotly_chart(fig_distance_best, use_container_width=True, key="best_distance_bar")
+                    
+                    with col_max_best:
+                        # Display Top Microrobots bar chart for best conditions
+                        st.markdown("#### Top Microrobots by Max Deflection")
+                        max_deflection_best = best_filtered_data.groupby('Microrobot')['Head Deflection Angle [°]'].max().reset_index()
+                        max_deflection_best = max_deflection_best.sort_values(by='Head Deflection Angle [°]', ascending=True).head(20)
+                        fig_best = px.bar(max_deflection_best, x='Microrobot', y='Head Deflection Angle [°]', 
+                                        title="Top Microrobots by Max Deflection (Best Conditions)", color_discrete_sequence=["green"])
+                        st.plotly_chart(fig_best, use_container_width=True, key="global_micro_bar_best")
                     
                     # Comparative table for best conditions
                     microrobots_best = best_filtered_data['Microrobot'].unique()
@@ -1508,42 +1518,48 @@ def main():
                 if difficult_filtered_data.empty or len(difficult_filtered_data['Microrobot'].unique()) <= 1:
                     st.warning("Not enough data after filtering by difficult conditions. Some microrobots may not have been tested under these exact conditions.")
                 else:
-                    # Create distance vs deflection plot for all selected microrobots as a bar chart
-                    if 'Magnetic Distance [cm]' in difficult_filtered_data.columns:
-                        st.markdown("#### Deflection vs Magnetic Distance by Microrobot")
-                        # Group by microrobot and magnetic distance and calculate mean deflection
-                        distance_data_difficult = difficult_filtered_data.groupby(['Microrobot', 'Magnetic Distance [cm]'])['Head Deflection Angle [°]'].mean().reset_index()
-                        
-                        # Convert Magnetic Distance to string to ensure proper categorical display in bar chart
-                        distance_data_difficult['Magnetic Distance [cm]'] = distance_data_difficult['Magnetic Distance [cm]'].astype(str)
-                        
-                        # Create bar chart with grouped bars
-                        fig_distance_difficult = px.bar(
-                            distance_data_difficult, 
-                            x='Magnetic Distance [cm]', 
-                            y='Head Deflection Angle [°]',
-                            color='Microrobot', 
-                            barmode='group',
-                            title="Deflection vs Magnetic Distance (Difficult Conditions)",
-                            color_discrete_sequence=px.colors.qualitative.Plotly
-                        )
-                        
-                        # Improve layout
-                        fig_distance_difficult.update_layout(
-                            xaxis_title="Magnetic Distance [cm]",
-                            yaxis_title="Mean Deflection Angle [°]",
-                            legend_title="Microrobot",
-                            bargap=0.15
-                        )
-                        
-                        st.plotly_chart(fig_distance_difficult, use_container_width=True, key="difficult_distance_bar")
+                    # Create two columns for side-by-side display of charts
+                    col_dist_diff, col_max_diff = st.columns(2)
                     
-                    # Display Top Microrobots bar chart for difficult conditions (sorted from lowest to highest)
-                    max_deflection_difficult = difficult_filtered_data.groupby('Microrobot')['Head Deflection Angle [°]'].max().reset_index()
-                    max_deflection_difficult = max_deflection_difficult.sort_values(by='Head Deflection Angle [°]', ascending=True).head(20)
-                    fig_difficult = px.bar(max_deflection_difficult, x='Microrobot', y='Head Deflection Angle [°]', 
-                                          title="Top Microrobots by Max Deflection (Difficult Conditions)", color_discrete_sequence=["red"])
-                    st.plotly_chart(fig_difficult, use_container_width=True, key="global_micro_bar_difficult")
+                    with col_dist_diff:
+                        # Create distance vs deflection plot for all selected microrobots as a bar chart
+                        if 'Magnetic Distance [cm]' in difficult_filtered_data.columns:
+                            st.markdown("#### Deflection vs Magnetic Distance by Microrobot")
+                            # Group by microrobot and magnetic distance and calculate mean deflection
+                            distance_data_difficult = difficult_filtered_data.groupby(['Microrobot', 'Magnetic Distance [cm]'])['Head Deflection Angle [°]'].mean().reset_index()
+                            
+                            # Convert Magnetic Distance to string to ensure proper categorical display in bar chart
+                            distance_data_difficult['Magnetic Distance [cm]'] = distance_data_difficult['Magnetic Distance [cm]'].astype(str)
+                            
+                            # Create bar chart with grouped bars
+                            fig_distance_difficult = px.bar(
+                                distance_data_difficult, 
+                                x='Magnetic Distance [cm]', 
+                                y='Head Deflection Angle [°]',
+                                color='Microrobot', 
+                                barmode='group',
+                                title="Deflection vs Magnetic Distance (Difficult Conditions)",
+                                color_discrete_sequence=px.colors.qualitative.Plotly
+                            )
+                            
+                            # Improve layout
+                            fig_distance_difficult.update_layout(
+                                xaxis_title="Magnetic Distance [cm]",
+                                yaxis_title="Mean Deflection Angle [°]",
+                                legend_title="Microrobot",
+                                bargap=0.15
+                            )
+                            
+                            st.plotly_chart(fig_distance_difficult, use_container_width=True, key="difficult_distance_bar")
+                    
+                    with col_max_diff:
+                        # Display Top Microrobots bar chart for difficult conditions
+                        st.markdown("#### Top Microrobots by Max Deflection")
+                        max_deflection_difficult = difficult_filtered_data.groupby('Microrobot')['Head Deflection Angle [°]'].max().reset_index()
+                        max_deflection_difficult = max_deflection_difficult.sort_values(by='Head Deflection Angle [°]', ascending=True).head(20)
+                        fig_difficult = px.bar(max_deflection_difficult, x='Microrobot', y='Head Deflection Angle [°]', 
+                                            title="Top Microrobots by Max Deflection (Difficult Conditions)", color_discrete_sequence=["red"])
+                        st.plotly_chart(fig_difficult, use_container_width=True, key="global_micro_bar_difficult")
                     
                     # Comparative table for difficult conditions
                     microrobots_difficult = difficult_filtered_data['Microrobot'].unique()
