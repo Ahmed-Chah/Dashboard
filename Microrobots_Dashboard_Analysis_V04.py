@@ -111,8 +111,7 @@ def determine_test_level(robot_data):
         # If it only has 45 and 90 degrees, it's Level 0
         if actuation_angles == {'45', '90'} or len(actuation_angles) <= 2:
             return 0
-    default = 'x'
-    return default
+    return 1
 
 def extract_detailed_sensitivity(df):
     """Extract detailed sensitivity metrics for a microrobot."""
@@ -1284,69 +1283,297 @@ def main():
             # Find common parameter values across selected microrobots
             common_param_values = find_common_parameter_values(microrobot_filtered_data)
             
-            # Apply common parameter values as filters for global analysis
-            if common_param_values:
-                filtered_all_data = filter_data_by_params(microrobot_filtered_data, common_param_values)
+            # Define predefined conditions
+            best_conditions = {
+                'Actuation Angle': ['90'],
+                'Magnetic Distance [cm]': ['13', '15', '17', '19', '21', '23', '25'],
+                'Gravity Force': ['0'],
+                'Actuation Mode': ['Attractive'],
+                'Flow Profile': ['Average'],
+                'Embedding length': ['10']
+            }
+    
+            difficult_conditions = {
+                'Actuation Angle': ['90'],
+                'Magnetic Distance [cm]': ['13', '15', '17', '19', '21', '23', '25'],
+                'Gravity Force': ['180'],
+                'Actuation Mode': ['Attractive'],
+                'Flow Profile': ['High'],
+                'Embedding length': ['10']
+            }
+            
+            # Create tabs for different analysis cases
+            global_tab1, global_tab2, global_tab3 = st.tabs(["Normal Case", "Best Conditions", "Difficult Conditions"])
+            
+            # Normal case tab
+            with global_tab1:
+                st.markdown("### Normal Case: Using Common Parameters")
+                
+                # Apply common parameter values as filters for normal case
+                if common_param_values:
+                    filtered_all_data = filter_data_by_params(microrobot_filtered_data, common_param_values)
+                    
+                    # Check if we have enough data after filtering
+                    if filtered_all_data.empty or len(filtered_all_data['Microrobot'].unique()) <= 1:
+                        st.warning("Not enough data after filtering by common parameter values. Using selected microrobots without parameter filtering.")
+                        filtered_all_data = microrobot_filtered_data
+                    else:
+                        # Show what common values are being used
+                        st.info(f"Analysis is using {len(selected_microrobots)} selected microrobots with parameter values common across them.")
+                        common_values_info = {param: ", ".join(values) for param, values in common_param_values.items()}
+                        common_values_df = pd.DataFrame({"Parameter": common_values_info.keys(), 
+                                                       "Common Values": common_values_info.values()})
+                        st.dataframe(common_values_df, use_container_width=True)
+                else:
+                    filtered_all_data = microrobot_filtered_data
+                    st.info(f"No common parameter values found across selected microrobots. Using all available data for the {len(selected_microrobots)} selected microrobots.")
+                
+                # Check if we have multiple microrobots after filtering
+                if len(filtered_all_data['Microrobot'].unique()) > 1:
+                    # Create distance vs deflection plot for all selected microrobots as a bar chart
+                    if 'Magnetic Distance [cm]' in filtered_all_data.columns:
+                        st.markdown("#### Deflection vs Magnetic Distance by Microrobot")
+                        # Group by microrobot and magnetic distance and calculate mean deflection
+                        distance_data = filtered_all_data.groupby(['Microrobot', 'Magnetic Distance [cm]'])['Head Deflection Angle [°]'].mean().reset_index()
+                        
+                        # Convert Magnetic Distance to string to ensure proper categorical display in bar chart
+                        distance_data['Magnetic Distance [cm]'] = distance_data['Magnetic Distance [cm]'].astype(str)
+                        
+                        # Create bar chart with grouped bars
+                        fig_distance = px.bar(
+                            distance_data, 
+                            x='Magnetic Distance [cm]', 
+                            y='Head Deflection Angle [°]',
+                            color='Microrobot', 
+                            barmode='group',
+                            title="Deflection vs Magnetic Distance (Normal Case)",
+                            color_discrete_sequence=px.colors.qualitative.Plotly
+                        )
+                        
+                        # Improve layout
+                        fig_distance.update_layout(
+                            xaxis_title="Magnetic Distance [cm]",
+                            yaxis_title="Mean Deflection Angle [°]",
+                            legend_title="Microrobot",
+                            bargap=0.15
+                        )
+                        
+                        st.plotly_chart(fig_distance, use_container_width=True, key="normal_distance_bar")
+                    
+                    # Display the Top Microrobots bar chart (sorted from lowest to highest)
+                    max_deflection_by_micro = filtered_all_data.groupby('Microrobot')['Head Deflection Angle [°]'].max().reset_index()
+                    max_deflection_by_micro = max_deflection_by_micro.sort_values(by='Head Deflection Angle [°]', ascending=True).head(20)
+                    fig9 = px.bar(max_deflection_by_micro, x='Microrobot', y='Head Deflection Angle [°]', 
+                                 title="Top Microrobots by Max Deflection (Normal Case)", color_discrete_sequence=["darkblue"])
+                    st.plotly_chart(fig9, use_container_width=True, key="global_micro_bar_normal")
+                    
+                    # Comparative table with filtered data for normal case
+                    microrobots_after_filter = filtered_all_data['Microrobot'].unique()
+                    all_sensitivity_data = []
+                    
+                    for robot in microrobots_after_filter:
+                        robot_data = filtered_all_data[filtered_all_data['Microrobot'] == robot]
+                        if not robot_data.empty:
+                            try:
+                                sensitivity = extract_detailed_sensitivity(robot_data)
+                                all_sensitivity_data.append(sensitivity)
+                            except Exception as e:
+                                st.warning(f"Could not extract sensitivity for {robot}: {e}")
+                    
+                    if all_sensitivity_data:
+                        rectified_df = pd.DataFrame(all_sensitivity_data)
+                        rectified_df['Rank'] = rectified_df['Max Deflection (°)'].rank(ascending=False).astype(int)
+                        cols = ['Microrobot', 'Rank', 'Max Deflection (°)', 'Mean Deflection (°)',
+                               'Most Sensitive Parameter', 'Actuation Angle Sensitivity (%)',
+                               'Distance Sensitivity (%)', 'Gravity Sensitivity (%)',
+                               'Actuation Mode Sensitivity (%)', 'Flow Sensitivity (%)',
+                               'Embedding Length Sensitivity (%)']
+                        rectified_df = rectified_df[cols].sort_values(by='Max Deflection (°)', ascending=False)
+                        
+                        st.markdown("### 📑 Comparative Table of Microrobots (Normal Case)")
+                        rectified_df.set_index('Microrobot', inplace=True)
+                        st.dataframe(rectified_df, use_container_width=True)
+                    else:
+                        st.warning("Not enough data for comparative analysis after filtering.")
+                else:
+                    st.info("After filtering, there are not enough different microrobots for comparison in Normal Case.")
+            
+            # Best conditions tab
+            with global_tab2:
+                st.markdown("### Best Conditions Case")
+                st.markdown("Analysis under optimal conditions for microrobot performance:")
+                
+                # Display the conditions being used
+                best_cond_df = pd.DataFrame({
+                    "Parameter": best_conditions.keys(),
+                    "Values": [', '.join(v) for v in best_conditions.values()]
+                })
+                st.dataframe(best_cond_df, use_container_width=True)
+                
+                # Filter the data for best conditions
+                best_filtered_data = microrobot_filtered_data.copy()
+                for param, values in best_conditions.items():
+                    if param in best_filtered_data.columns:
+                        best_filtered_data = best_filtered_data[best_filtered_data[param].astype(str).isin(values)]
                 
                 # Check if we have enough data after filtering
-                if filtered_all_data.empty or len(filtered_all_data['Microrobot'].unique()) <= 1:
-                    st.warning("Not enough data after filtering by common parameter values. Using selected microrobots without parameter filtering.")
-                    filtered_all_data = microrobot_filtered_data
+                if best_filtered_data.empty or len(best_filtered_data['Microrobot'].unique()) <= 1:
+                    st.warning("Not enough data after filtering by best conditions. Some microrobots may not have been tested under these exact conditions.")
                 else:
-                    # Show what common values are being used
-                    st.info(f"Global analysis is using {len(selected_microrobots)} selected microrobots with parameter values common across them.")
-                    common_values_info = {param: ", ".join(values) for param, values in common_param_values.items()}
-                    common_values_df = pd.DataFrame({"Parameter": common_values_info.keys(), 
-                                                   "Common Values": common_values_info.values()})
-                    st.dataframe(common_values_df, use_container_width=True)
-            else:
-                filtered_all_data = microrobot_filtered_data
-                st.info(f"No common parameter values found across selected microrobots. Using all available data for the {len(selected_microrobots)} selected microrobots.")
-            
-            # Check if we have multiple microrobots after filtering
-            if len(filtered_all_data['Microrobot'].unique()) > 1:
-                fig8 = px.box(filtered_all_data, x='Microrobot', y='Head Deflection Angle [°]', 
-                             title="Deflection by Microrobot", color_discrete_sequence=["brown"])
-                st.plotly_chart(fig8, use_container_width=True, key="global_micro_box")
-                
-                max_deflection_by_micro = filtered_all_data.groupby('Microrobot')['Head Deflection Angle [°]'].max().reset_index()
-                max_deflection_by_micro = max_deflection_by_micro.sort_values(by='Head Deflection Angle [°]', ascending=True).head(20)
-                fig9 = px.bar(max_deflection_by_micro, x='Microrobot', y='Head Deflection Angle [°]', 
-                             title="Top Microrobots by Max Deflection", color_discrete_sequence=["darkblue"])
-                st.plotly_chart(fig9, use_container_width=True, key="global_micro_bar")
-                
-                # Comparative table with filtered data
-                microrobots_after_filter = filtered_all_data['Microrobot'].unique()
-                all_sensitivity_data = []
-                
-                for robot in microrobots_after_filter:
-                    robot_data = filtered_all_data[filtered_all_data['Microrobot'] == robot]
-                    if not robot_data.empty:
-                        try:
-                            sensitivity = extract_detailed_sensitivity(robot_data)
-                            all_sensitivity_data.append(sensitivity)
-                        except Exception as e:
-                            st.warning(f"Could not extract sensitivity for {robot}: {e}")
-                
-                if all_sensitivity_data:
-                    rectified_df = pd.DataFrame(all_sensitivity_data)
-                    rectified_df['Rank'] = rectified_df['Max Deflection (°)'].rank(ascending=False).astype(int)
-                    cols = ['Microrobot', 'Rank', 'Max Deflection (°)', 'Mean Deflection (°)',
-                           'Most Sensitive Parameter', 'Actuation Angle Sensitivity (%)',
-                           'Distance Sensitivity (%)', 'Gravity Sensitivity (%)',
-                           'Actuation Mode Sensitivity (%)', 'Flow Sensitivity (%)',
-                           'Embedding Length Sensitivity (%)']
-                    rectified_df = rectified_df[cols].sort_values(by='Max Deflection (°)', ascending=False)
+                    # Create distance vs deflection plot for all selected microrobots as a bar chart
+                    if 'Magnetic Distance [cm]' in best_filtered_data.columns:
+                        st.markdown("#### Deflection vs Magnetic Distance by Microrobot")
+                        # Group by microrobot and magnetic distance and calculate mean deflection
+                        distance_data_best = best_filtered_data.groupby(['Microrobot', 'Magnetic Distance [cm]'])['Head Deflection Angle [°]'].mean().reset_index()
+                        
+                        # Convert Magnetic Distance to string to ensure proper categorical display in bar chart
+                        distance_data_best['Magnetic Distance [cm]'] = distance_data_best['Magnetic Distance [cm]'].astype(str)
+                        
+                        # Create bar chart with grouped bars
+                        fig_distance_best = px.bar(
+                            distance_data_best, 
+                            x='Magnetic Distance [cm]', 
+                            y='Head Deflection Angle [°]',
+                            color='Microrobot', 
+                            barmode='group',
+                            title="Deflection vs Magnetic Distance (Best Conditions)",
+                            color_discrete_sequence=px.colors.qualitative.Plotly
+                        )
+                        
+                        # Improve layout
+                        fig_distance_best.update_layout(
+                            xaxis_title="Magnetic Distance [cm]",
+                            yaxis_title="Mean Deflection Angle [°]",
+                            legend_title="Microrobot",
+                            bargap=0.15
+                        )
+                        
+                        st.plotly_chart(fig_distance_best, use_container_width=True, key="best_distance_bar")
                     
-                    st.markdown("<div class='section'>", unsafe_allow_html=True)
-                    st.header("📑 Comparative Table of Microrobots")
-                    rectified_df.set_index('Microrobot', inplace=True)
-                    st.dataframe(rectified_df, use_container_width=True)
-                    st.markdown("</div>", unsafe_allow_html=True)
+                    # Display Top Microrobots bar chart for best conditions (sorted from lowest to highest)
+                    max_deflection_best = best_filtered_data.groupby('Microrobot')['Head Deflection Angle [°]'].max().reset_index()
+                    max_deflection_best = max_deflection_best.sort_values(by='Head Deflection Angle [°]', ascending=True).head(20)
+                    fig_best = px.bar(max_deflection_best, x='Microrobot', y='Head Deflection Angle [°]', 
+                                     title="Top Microrobots by Max Deflection (Best Conditions)", color_discrete_sequence=["green"])
+                    st.plotly_chart(fig_best, use_container_width=True, key="global_micro_bar_best")
+                    
+                    # Comparative table for best conditions
+                    microrobots_best = best_filtered_data['Microrobot'].unique()
+                    all_sensitivity_data_best = []
+                    
+                    for robot in microrobots_best:
+                        robot_data = best_filtered_data[best_filtered_data['Microrobot'] == robot]
+                        if not robot_data.empty:
+                            try:
+                                sensitivity = extract_detailed_sensitivity(robot_data)
+                                all_sensitivity_data_best.append(sensitivity)
+                            except Exception as e:
+                                st.warning(f"Could not extract sensitivity for {robot} under best conditions: {e}")
+                    
+                    if all_sensitivity_data_best:
+                        rectified_df_best = pd.DataFrame(all_sensitivity_data_best)
+                        rectified_df_best['Rank'] = rectified_df_best['Max Deflection (°)'].rank(ascending=False).astype(int)
+                        cols = ['Microrobot', 'Rank', 'Max Deflection (°)', 'Mean Deflection (°)',
+                               'Most Sensitive Parameter', 'Actuation Angle Sensitivity (%)',
+                               'Distance Sensitivity (%)', 'Gravity Sensitivity (%)',
+                               'Actuation Mode Sensitivity (%)', 'Flow Sensitivity (%)',
+                               'Embedding Length Sensitivity (%)']
+                        rectified_df_best = rectified_df_best[cols].sort_values(by='Max Deflection (°)', ascending=False)
+                        
+                        st.markdown("### 📑 Comparative Table of Microrobots (Best Conditions)")
+                        rectified_df_best.set_index('Microrobot', inplace=True)
+                        st.dataframe(rectified_df_best, use_container_width=True)
+                    else:
+                        st.warning("Not enough data for comparative analysis under best conditions.")
+            
+            # Difficult conditions tab
+            with global_tab3:
+                st.markdown("### Difficult Conditions Case")
+                st.markdown("Analysis under challenging conditions for microrobot performance:")
+                
+                # Display the conditions being used
+                difficult_cond_df = pd.DataFrame({
+                    "Parameter": difficult_conditions.keys(),
+                    "Values": [', '.join(v) for v in difficult_conditions.values()]
+                })
+                st.dataframe(difficult_cond_df, use_container_width=True)
+                
+                # Filter the data for difficult conditions
+                difficult_filtered_data = microrobot_filtered_data.copy()
+                for param, values in difficult_conditions.items():
+                    if param in difficult_filtered_data.columns:
+                        difficult_filtered_data = difficult_filtered_data[difficult_filtered_data[param].astype(str).isin(values)]
+                
+                # Check if we have enough data after filtering
+                if difficult_filtered_data.empty or len(difficult_filtered_data['Microrobot'].unique()) <= 1:
+                    st.warning("Not enough data after filtering by difficult conditions. Some microrobots may not have been tested under these exact conditions.")
                 else:
-                    st.warning("Not enough data for comparative analysis after filtering.")
-            else:
-                st.info("After filtering, there are not enough different microrobots for comparison.")
+                    # Create distance vs deflection plot for all selected microrobots as a bar chart
+                    if 'Magnetic Distance [cm]' in difficult_filtered_data.columns:
+                        st.markdown("#### Deflection vs Magnetic Distance by Microrobot")
+                        # Group by microrobot and magnetic distance and calculate mean deflection
+                        distance_data_difficult = difficult_filtered_data.groupby(['Microrobot', 'Magnetic Distance [cm]'])['Head Deflection Angle [°]'].mean().reset_index()
+                        
+                        # Convert Magnetic Distance to string to ensure proper categorical display in bar chart
+                        distance_data_difficult['Magnetic Distance [cm]'] = distance_data_difficult['Magnetic Distance [cm]'].astype(str)
+                        
+                        # Create bar chart with grouped bars
+                        fig_distance_difficult = px.bar(
+                            distance_data_difficult, 
+                            x='Magnetic Distance [cm]', 
+                            y='Head Deflection Angle [°]',
+                            color='Microrobot', 
+                            barmode='group',
+                            title="Deflection vs Magnetic Distance (Difficult Conditions)",
+                            color_discrete_sequence=px.colors.qualitative.Plotly
+                        )
+                        
+                        # Improve layout
+                        fig_distance_difficult.update_layout(
+                            xaxis_title="Magnetic Distance [cm]",
+                            yaxis_title="Mean Deflection Angle [°]",
+                            legend_title="Microrobot",
+                            bargap=0.15
+                        )
+                        
+                        st.plotly_chart(fig_distance_difficult, use_container_width=True, key="difficult_distance_bar")
+                    
+                    # Display Top Microrobots bar chart for difficult conditions (sorted from lowest to highest)
+                    max_deflection_difficult = difficult_filtered_data.groupby('Microrobot')['Head Deflection Angle [°]'].max().reset_index()
+                    max_deflection_difficult = max_deflection_difficult.sort_values(by='Head Deflection Angle [°]', ascending=True).head(20)
+                    fig_difficult = px.bar(max_deflection_difficult, x='Microrobot', y='Head Deflection Angle [°]', 
+                                          title="Top Microrobots by Max Deflection (Difficult Conditions)", color_discrete_sequence=["red"])
+                    st.plotly_chart(fig_difficult, use_container_width=True, key="global_micro_bar_difficult")
+                    
+                    # Comparative table for difficult conditions
+                    microrobots_difficult = difficult_filtered_data['Microrobot'].unique()
+                    all_sensitivity_data_difficult = []
+                    
+                    for robot in microrobots_difficult:
+                        robot_data = difficult_filtered_data[difficult_filtered_data['Microrobot'] == robot]
+                        if not robot_data.empty:
+                            try:
+                                sensitivity = extract_detailed_sensitivity(robot_data)
+                                all_sensitivity_data_difficult.append(sensitivity)
+                            except Exception as e:
+                                st.warning(f"Could not extract sensitivity for {robot} under difficult conditions: {e}")
+                    
+                    if all_sensitivity_data_difficult:
+                        rectified_df_difficult = pd.DataFrame(all_sensitivity_data_difficult)
+                        rectified_df_difficult['Rank'] = rectified_df_difficult['Max Deflection (°)'].rank(ascending=False).astype(int)
+                        cols = ['Microrobot', 'Rank', 'Max Deflection (°)', 'Mean Deflection (°)',
+                               'Most Sensitive Parameter', 'Actuation Angle Sensitivity (%)',
+                               'Distance Sensitivity (%)', 'Gravity Sensitivity (%)',
+                               'Actuation Mode Sensitivity (%)', 'Flow Sensitivity (%)',
+                               'Embedding Length Sensitivity (%)']
+                        rectified_df_difficult = rectified_df_difficult[cols].sort_values(by='Max Deflection (°)', ascending=False)
+                        
+                        st.markdown("### 📑 Comparative Table of Microrobots (Difficult Conditions)")
+                        rectified_df_difficult.set_index('Microrobot', inplace=True)
+                        st.dataframe(rectified_df_difficult, use_container_width=True)
+                    else:
+                        st.warning("Not enough data for comparative analysis under difficult conditions.")
+                        
         else:
             st.info("Not enough microrobot data files found for global analysis.")
         
