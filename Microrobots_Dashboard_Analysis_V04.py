@@ -111,9 +111,8 @@ def determine_test_level(robot_data):
         # If it only has 45 and 90 degrees, it's Level 0
         if actuation_angles == {'45', '90'} or len(actuation_angles) <= 2:
             return 0
-    
-    # Default to Level 1 for anything else
-    return 1
+    default = 'x'
+    return default
 
 def extract_detailed_sensitivity(df):
     """Extract detailed sensitivity metrics for a microrobot."""
@@ -319,7 +318,7 @@ def show_simple_parameter_variations_table(all_data):
             options=[0, 1, 2],
             default=[0, 1, 2],
             format_func=lambda x: f"Level {x}",
-            help="Level 0: Basic testing, Level 1: Intermediate testing, Level 2: Comprehensive testing"
+            help="Level 0: Basic testing, Level 1: Protocol 1, Level 2: Protocol 2"
         )
         
         # Create a table with all parameters directly included
@@ -635,6 +634,7 @@ def perform_special_analysis(all_data, param_values, current_microrobot_data=Non
     st.markdown("<div class='section'>", unsafe_allow_html=True)
     st.header("🔍 Special Parameter Analysis")
     st.markdown("Analyze how microrobot deflection varies with one parameter while keeping other parameters fixed.")
+    st.markdown("In this section you can plot different graphics of microrobots.")
     
     # Get list of all available microrobots from data
     available_microrobots = []
@@ -1029,6 +1029,14 @@ def main():
     # Section toggles in sidebar
     st.sidebar.header("Dashboard Sections")
 
+    st.session_state.show_all_variations = st.sidebar.toggle(
+        "Show All Microrobots Parameter Variations", 
+        value=st.session_state.show_all_variations
+    )
+    st.session_state.show_unified_params = st.sidebar.toggle(
+        "Show Unified Parameter Values", 
+        value=st.session_state.show_unified_params
+    )
     st.session_state.show_microrobot_analysis = st.sidebar.toggle(
         "Show Individual Microrobot Analysis", 
         value=st.session_state.show_microrobot_analysis
@@ -1045,14 +1053,6 @@ def main():
     st.session_state.show_force_visualization = st.sidebar.toggle(
         "Show Force Visualization", 
         value=st.session_state.show_force_visualization
-    )
-    st.session_state.show_unified_params = st.sidebar.toggle(
-        "Show Unified Parameter Values", 
-        value=st.session_state.show_unified_params
-    )
-    st.session_state.show_all_variations = st.sidebar.toggle(
-        "Show All Microrobots Parameter Variations", 
-        value=st.session_state.show_all_variations
     )
     
     # Load all data initially
@@ -1248,33 +1248,60 @@ def main():
         st.plotly_chart(fig7, use_container_width=True, key="sensitivity_pie")
         st.markdown("</div>", unsafe_allow_html=True)
     
-    # Global analysis - UPDATED to use common parameter values
+    # Global analysis with microrobot selection
     if st.session_state.show_global_analysis:
         st.markdown("<div class='section'>", unsafe_allow_html=True)
         st.header("🌍 Global Analysis of Microrobots")
         
         if all_data is not None and len(microrobots) > 1:
-            # Find common parameter values across all microrobots
-            common_param_values = find_common_parameter_values(all_data)
+            # Add microrobot selection
+            st.subheader("🤖 Select Microrobots for Analysis")
+            
+            # Initialize selected microrobots in session state if not exists
+            if 'selected_microrobots_global' not in st.session_state:
+                st.session_state.selected_microrobots_global = microrobots
+            
+            # Create multiselect for microrobot selection
+            selected_microrobots = st.multiselect(
+                "Choose microrobots to include in the analysis:",
+                options=microrobots,
+                default=st.session_state.selected_microrobots_global,
+                key="global_microrobot_select"
+            )
+            
+            # Update session state with new selection
+            st.session_state.selected_microrobots_global = selected_microrobots
+            
+            # Check if any microrobots are selected
+            if not selected_microrobots:
+                st.warning("Please select at least one microrobot for analysis.")
+                st.markdown("</div>", unsafe_allow_html=True)
+                return
+            
+            # Filter data based on selected microrobots
+            microrobot_filtered_data = all_data[all_data['Microrobot'].isin(selected_microrobots)]
+            
+            # Find common parameter values across selected microrobots
+            common_param_values = find_common_parameter_values(microrobot_filtered_data)
             
             # Apply common parameter values as filters for global analysis
             if common_param_values:
-                filtered_all_data = filter_data_by_params(all_data, common_param_values)
+                filtered_all_data = filter_data_by_params(microrobot_filtered_data, common_param_values)
                 
                 # Check if we have enough data after filtering
                 if filtered_all_data.empty or len(filtered_all_data['Microrobot'].unique()) <= 1:
-                    st.warning("Not enough data after filtering by common parameter values. Using all available data instead.")
-                    filtered_all_data = all_data
+                    st.warning("Not enough data after filtering by common parameter values. Using selected microrobots without parameter filtering.")
+                    filtered_all_data = microrobot_filtered_data
                 else:
                     # Show what common values are being used
-                    st.info("Global analysis is using only parameter values common across all microrobots.")
+                    st.info(f"Global analysis is using {len(selected_microrobots)} selected microrobots with parameter values common across them.")
                     common_values_info = {param: ", ".join(values) for param, values in common_param_values.items()}
                     common_values_df = pd.DataFrame({"Parameter": common_values_info.keys(), 
                                                    "Common Values": common_values_info.values()})
                     st.dataframe(common_values_df, use_container_width=True)
             else:
-                filtered_all_data = all_data
-                st.info("No common parameter values found across all microrobots. Using all available data.")
+                filtered_all_data = microrobot_filtered_data
+                st.info(f"No common parameter values found across selected microrobots. Using all available data for the {len(selected_microrobots)} selected microrobots.")
             
             # Check if we have multiple microrobots after filtering
             if len(filtered_all_data['Microrobot'].unique()) > 1:
