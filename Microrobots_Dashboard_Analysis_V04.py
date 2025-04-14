@@ -82,6 +82,39 @@ def calculate_sensitivity(df):
     # Calculate sensitivity percentages
     return {k: (v / total_difference) * 100 for k, v in deflection_differences.items()}
 
+def determine_test_level(robot_data):
+    if robot_data.empty:
+        return 0
+    
+    # Define the required values for Level 1
+    level_1_criteria = {
+        'Actuation Angle': ['20', '45', '67', '90'],
+        'Magnetic Distance [cm]': ['13', '15', '17', '19', '21', '23', '25', '27', '29', '31', '33', '35'],
+        'Gravity Force': ['0', '90', '180'],
+        'Actuation Mode': ['Attractive', 'Repulsive'],
+        'Flow Profile': ['Average', 'High', 'No Flow'],
+        'Embedding length': ['10']
+    }
+    
+    # Special check for GEN4-V1 or any microrobot with extensive Actuation Angle variations
+    if 'Microrobot' in robot_data.columns and 'Actuation Angle' in robot_data.columns:
+        actuation_angles = set(str(val) for val in robot_data['Actuation Angle'].unique() if pd.notna(val))
+        
+        # If it's GEN4-V1 or has more actuation angles than required for Level 1
+        if len(actuation_angles) > len(level_1_criteria['Actuation Angle']):
+            return 2
+    
+    # Check for Level 0 (minimal testing - just 45 and 90 degrees)
+    if 'Actuation Angle' in robot_data.columns:
+        actuation_angles = set(str(val) for val in robot_data['Actuation Angle'].unique() if pd.notna(val))
+        
+        # If it only has 45 and 90 degrees, it's Level 0
+        if actuation_angles == {'45', '90'} or len(actuation_angles) <= 2:
+            return 0
+    
+    # Default to Level 1 for anything else
+    return 1
+
 def extract_detailed_sensitivity(df):
     """Extract detailed sensitivity metrics for a microrobot."""
     sensitivity_factors = ['Actuation Angle', 'Magnetic Distance [cm]', 'Gravity Force',
@@ -279,12 +312,33 @@ def show_simple_parameter_variations_table(all_data):
         st.markdown("<div class='section'>", unsafe_allow_html=True)
         st.markdown("This table shows what parameter values were tested for each microrobot design.")
         
+        # Add test level filter
+        st.subheader("🔍 Filter by Test Level")
+        selected_levels = st.multiselect(
+            "Select test levels to display:",
+            options=[0, 1, 2],
+            default=[0, 1, 2],
+            format_func=lambda x: f"Level {x}",
+            help="Level 0: Basic testing, Level 1: Intermediate testing, Level 2: Comprehensive testing"
+        )
+        
         # Create a table with all parameters directly included
         variation_data = []
         
         for robot in microrobots:
             robot_data = all_data[all_data['Microrobot'] == robot]
-            robot_variations = {"Microrobot": robot}
+            
+            # Determine test level for this microrobot
+            test_level = determine_test_level(robot_data)
+            
+            # Skip if the test level is not selected in the filter
+            if test_level not in selected_levels:
+                continue
+            
+            robot_variations = {
+                "Microrobot": robot,
+                "Test Level": f"Level {test_level}"
+            }
             
             for param in param_columns:
                 if param in robot_data.columns:
@@ -305,10 +359,27 @@ def show_simple_parameter_variations_table(all_data):
             # Set Microrobot column as index to fix it when scrolling
             variation_df = variation_df.set_index('Microrobot')
             
+            # Add color coding for test levels
+            st.markdown("""
+            <style>
+            .level-0 { background-color: #ffcccc; }
+            .level-1 { background-color: #ffffcc; }
+            .level-2 { background-color: #ccffcc; }
+            </style>
+            """, unsafe_allow_html=True)
+            
             # Display the table with all parameters
             st.dataframe(variation_df, use_container_width=True)
         else:
-            st.info("No parameter variation data available.")
+            st.info("No parameter variation data available for the selected test levels.")
+        
+        # Add a legend for test levels
+        st.markdown("## Test Level Legend")
+        st.markdown("""
+        - **Level 0**: Basic testing when starting magneto-fluidic deflection test
+        - **Level 1**: Test protocol for evalute and check new microrobot deflection
+        - **Level 2**: Test for deflection model traning
+        """)
         
         st.markdown("</div>", unsafe_allow_html=True)
 
@@ -911,6 +982,22 @@ def main():
             margin-bottom: 20px;
             background-color: #ffffff;
         }
+        /* Test level styling */
+        .level-0 {
+            background-color: #ffcccc;
+            padding: 2px 6px;
+            border-radius: 3px;
+        }
+        .level-1 {
+            background-color: #ffffcc;
+            padding: 2px 6px;
+            border-radius: 3px;
+        }
+        .level-2 {
+            background-color: #ccffcc;
+            padding: 2px 6px;
+            border-radius: 3px;
+        }
         </style>
     """, unsafe_allow_html=True)
     
@@ -1052,10 +1139,26 @@ def main():
         microrobot_name = filtered_df['Microrobot'].iloc[0]
         parameters = extract_microrobot_parameters(filtered_df)
         
-        # Microrobot specifications
+        # Get test level for this microrobot
+        test_level = determine_test_level(filtered_df)
+        
+        # Microrobot specifications with test level
         st.markdown("<div class='section'>", unsafe_allow_html=True)
         st.header("📌 Microrobot Specifications")
-        st.text(f"Line Type: {parameters['Line']}")
+        col_info, col_test = st.columns([3, 1])
+        
+        with col_info:
+            st.text(f"Line Type: {parameters['Line']}")
+        
+        with col_test:
+            # Display test level with appropriate styling
+            level_colors = {0: "#ffcccc", 1: "#ffffcc", 2: "#ccffcc"}
+            st.markdown(f"""
+                <div style="text-align: center; padding: 10px; background-color: {level_colors[test_level]}; 
+                border-radius: 5px; margin-bottom: 10px;">
+                    <h3 style="margin: 0;">Test Level: {test_level}</h3>
+                </div>
+            """, unsafe_allow_html=True)
         
         col1, col2 = st.columns(2)
         with col1:
@@ -1070,6 +1173,8 @@ def main():
         st.markdown("</div>", unsafe_allow_html=True)
         
         # NEW FEATURE: Parameter Variations Table
+        if st.session_state.show_parameter_variations:
+            show_parameter_variations(filtered_df, all_data)
         
         # Microrobot analysis
         st.markdown("<div class='section'>", unsafe_allow_html=True)

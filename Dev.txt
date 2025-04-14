@@ -1,0 +1,4 @@
+1- Add Levels in  Parameter Variations for All Microrobots Section.
+2- Select the microrobots that the user want to include in global analysis.
+3- Add best and bad cases in Dashboard for quick analysis.
+4- Possibility to add variation in the same graphic (For differente microrobot and same params)
